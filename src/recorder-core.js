@@ -17,7 +17,7 @@ https://github.com/xiangyuecn/Recorder
 "use strict";
 
 //兼容环境
-var LM="2020-1-8 10:53:14";
+var LM="2019-11-7 21:47:48";
 var NOOP=function(){};
 //end 兼容环境 ****从以下开始copy源码*****
 
@@ -58,9 +58,9 @@ Recorder.BindDestroy=function(key,call){
 //判断浏览器是否支持录音，随时可以调用。注意：仅仅是检测浏览器支持情况，不会判断和调起用户授权，不会判断是否支持特定格式录音。
 Recorder.Support=function(){
 	var AC=window.AudioContext;
-	if(!AC){
-		AC=window.webkitAudioContext;
-	};
+	// if(!AC){
+	// 	AC=window.webkitAudioContext;
+	// };
 	if(!AC){
 		return false;
 	};
@@ -220,33 +220,6 @@ Recorder.SampleData=function(pcmDatas,pcmSampleRate,newSampleRate,prevChunkInfo,
 		,data:res
 	};
 };
-
-
-/*计算音量百分比的一个方法
-pcmAbsSum: pcm Int16所有采样的绝对值的和
-pcmLength: pcm长度
-返回值：0-100，主要当做百分比用
-注意：这个不是分贝，因此没用volume当做名称*/
-Recorder.PowerLevel=function(pcmAbsSum,pcmLength){
-	/*计算音量 https://blog.csdn.net/jody1989/article/details/73480259
-	更高灵敏度算法:
-		限定最大感应值10000
-			线性曲线：低音量不友好
-				power/10000*100 
-			对数曲线：低音量友好，但需限定最低感应值
-				(1+Math.log10(power/10000))*100
-	*/
-	var power=(pcmAbsSum/pcmLength) || 0;//NaN
-	var level;
-	if(power<1251){//1250的结果10%，更小的音量采用线性取值
-		level=Math.round(power/1250*10);
-	}else{
-		level=Math.round(Math.min(100,Math.max(0,(1+Math.log(power/10000)/Math.log(10))*100)));
-	};
-	return level;
-};
-
-
 var ID=0;
 function initFn(set){
 	this.id=++ID;
@@ -256,14 +229,14 @@ function initFn(set){
 	
 	
 	var o={
-		type:"mp3" //输出类型：mp3,wav，wav输出文件尺寸超大不推荐使用，但mp3编码支持会导致js文件超大，如果不需支持mp3可以使js文件大幅减小
+		type:"wav" //输出类型：mp3,wav，wav输出文件尺寸超大不推荐使用，但mp3编码支持会导致js文件超大，如果不需支持mp3可以使js文件大幅减小
 		,bitRate:16 //比特率 wav:16或8位，MP3：8kbps 1k/s，8kbps 2k/s 录音文件很小
 		
 		,sampleRate:16000 //采样率，wav格式大小=sampleRate*时间；mp3此项对低比特率有影响，高比特率几乎无影响。
 					//wav任意值，mp3取值范围：48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000
 					//采样率参考https://www.cnblogs.com/devin87/p/mp3-recorder.html
 		
-		,onProcess:NOOP //fn(buffers,powerLevel,bufferDuration,bufferSampleRate,newBufferIdx,asyncEnd) buffers=[[Int16,...],...]：缓冲的PCM数据，为从开始录音到现在的所有pcm片段；powerLevel：当前缓冲的音量级别0-100，bufferDuration：已缓冲时长，bufferSampleRate：缓冲使用的采样率（当type支持边录边转码(Worker)时，此采样率和设置的采样率相同，否则不一定相同）；newBufferIdx:本次回调新增的buffer起始索引；asyncEnd:fn() 如果onProcess是异步的(返回值为true时)，处理完成时需要调用此回调，如果不是异步的请忽略此参数，此方法回调时必须是真异步（不能真异步时需用setTimeout包裹）。onProcess返回值：如果返回true代表开启异步模式，在某些大量运算的场合异步是必须的，必须在异步处理完成时调用asyncEnd(不能真异步时需用setTimeout包裹)，在onProcess执行后新增的buffer会全部替换成空数组，因此本回调开头应立即将newBufferIdx到本次回调结尾位置的buffer全部保存到另外一个数组内，处理完成后写回buffers中本次回调的结尾位置。
+		,onProcess:NOOP //fn(buffers,powerLevel,bufferDuration,bufferSampleRate) buffers=[[Int16,...],...]：缓冲的PCM数据，为从开始录音到现在的所有pcm片段；powerLevel：当前缓冲的音量级别0-100，bufferDuration：已缓冲时长，bufferSampleRate：缓冲使用的采样率（当type支持边录边转码(Worker)时，此采样率和设置的采样率相同，否则不一定相同）
 		
 		//,disableEnvInFix:false 内部参数，禁用设备卡顿时音频输入丢失补偿功能
 	};
@@ -358,6 +331,7 @@ Recorder.prototype=initFn.prototype={
 			
 			codeFail(code,"无法录音："+code);
 		};
+		//创建getUserMedia实例，请求权限
 		var pro=Recorder.Scope.getUserMedia({audio:true},f1,f2);
 		if(pro&&pro.then){
 			pro.then(f1)[True&&"catch"](f2); //fix 关键字，保证catch压缩时保持字符串形式
@@ -441,13 +415,33 @@ Recorder.prototype=initFn.prototype={
 	}
 	,envIn:function(pcm,sum){//和平台环境无关的pcm[Int16]输入
 		var This=this,set=This.set,engineCtx=This.engineCtx;
-		var bufferSampleRate=This.srcSampleRate;
 		var size=pcm.length;
-		var powerLevel=Recorder.PowerLevel(sum,size);
+		This.recSize+=size;
 		
 		var buffers=This.buffers;
-		var bufferFirstIdx=buffers.length;//之前的buffer都是经过onProcess处理好的，不允许再修改
 		buffers.push(pcm);
+
+		
+		/*计算音量 https://blog.csdn.net/jody1989/article/details/73480259
+		更高灵敏度算法:
+			限定最大感应值10000
+				线性曲线：低音量不友好
+					power/10000*100 
+				对数曲线：低音量友好，但需限定最低感应值
+					(1+Math.log10(power/10000))*100
+		*/
+		var power=sum/size;
+		var powerLevel;
+		if(power<1251){//1250的结果10%，更小的音量采用线性取值
+			powerLevel=Math.round(power/1250*10);
+		}else{
+			powerLevel=Math.round(Math.min(100,Math.max(0,(1+Math.log(power/10000)/Math.log(10))*100)));
+		}
+		
+		var bufferSampleRate=This.srcSampleRate;
+		var bufferSize=This.recSize;
+		
+		
 		
 		//卡顿丢失补偿：因为设备很卡的时候导致H5接收到的数据量不够造成播放时候变速，结果比实际的时长要短，此处保证了不会变短，但不能修复丢失的音频数据造成音质变差。当前算法采用输入时间侦测下一帧是否需要添加补偿帧，需要(6次输入||超过1秒)以上才会开始侦测，如果滑动窗口内丢失超过1/3就会进行补偿
 		var now=Date.now();
@@ -484,16 +478,12 @@ Recorder.prototype=initFn.prototype={
 				//用静默进行补偿
 				if(fixOpen){
 					var addPcm=new Int16Array(addTime*bufferSampleRate/1000);
-					size+=addPcm.length;
+					This.recSize+=addPcm.length;
 					buffers.push(addPcm);
 				};
 			};
 		};
 		
-		
-		var sizeOld=This.recSize,addSize=size;
-		var bufferSize=sizeOld+addSize;
-		This.recSize=bufferSize;//此值在onProcess后需要修正，可能新数据被修改
 		
 		
 		//此类型有边录边转码(Worker)支持，开启实时转码
@@ -502,74 +492,19 @@ Recorder.prototype=initFn.prototype={
 			var chunkInfo=Recorder.SampleData(buffers,bufferSampleRate,set.sampleRate,engineCtx.chunkInfo);
 			engineCtx.chunkInfo=chunkInfo;
 			
-			sizeOld=engineCtx.pcmSize;
-			addSize=chunkInfo.data.length;
-			bufferSize=sizeOld+addSize;
-			engineCtx.pcmSize=bufferSize;//此值在onProcess后需要修正，可能新数据被修改
-			
+			engineCtx.pcmSize+=chunkInfo.data.length;
+			bufferSize=engineCtx.pcmSize;
 			buffers=engineCtx.pcmDatas;
-			bufferFirstIdx=buffers.length;
 			buffers.push(chunkInfo.data);
 			bufferSampleRate=chunkInfo.sampleRate;
+			
+			//推入后台转码
+			This[set.type+"_encode"](engineCtx,chunkInfo.data);
 		};
 		
 		var duration=Math.round(bufferSize/bufferSampleRate*1000);
-		var bufferNextIdx=buffers.length;
 		
-		//允许异步处理buffer数据
-		var asyncEnd=function(){
-			//重新计算size，去掉本次添加的然后重新计算
-			var num=asyncBegin?0:-addSize;
-			var hasClear=0;
-			for(var i=bufferFirstIdx;i<bufferNextIdx;i++){
-				var buffer=buffers[i];
-				if(buffer==null){//已被主动释放内存，比如长时间实时传输录音时
-					hasClear=1;
-				}else{
-					num+=buffer.length;
-					
-					//推入后台边录边转码
-					if(engineCtx&&buffer.length){
-						This[set.type+"_encode"](engineCtx,buffer);
-					};
-				};
-			};
-			
-			if(!hasClear){
-				if(engineCtx){
-					engineCtx.pcmSize+=num;
-				}else{
-					This.recSize+=num;
-				};
-			};
-		};
-		//实时回调处理数据，允许修改或替换上次回调以来新增的数据 ，但是不允许修改已处理过的，不允许增删第一维数组 ，允许将第二维数组任意修改替换成空数组也可以
-		var asyncBegin=set.onProcess(buffers,powerLevel,duration,bufferSampleRate,bufferFirstIdx,asyncEnd);
-		
-		if(asyncBegin===true){
-			//开启了异步模式，onProcess已接管buffers新数据，立即清空，避免出现未处理的数据
-			var hasClear=0;
-			for(var i=bufferFirstIdx;i<bufferNextIdx;i++){
-				if(buffers[i]==null){//已被主动释放内存，比如长时间实时传输录音时 ，但又要开启异步模式，此种情况是非法的
-					hasClear=1;
-				}else{
-					buffers[i]=new Int16Array(0);
-				};
-			};
-			
-			if(hasClear){
-				console.warn("异步模式下不能清除buffers");
-			}else{
-				//还原size
-				if(engineCtx){
-					engineCtx.pcmSize-=addSize;
-				}else{
-					This.recSize-=addSize;
-				};
-			};
-		}else{
-			asyncEnd();
-		};
+		set.onProcess(buffers,powerLevel,duration,bufferSampleRate,chunkInfo.data);
 	}
 	
 	
